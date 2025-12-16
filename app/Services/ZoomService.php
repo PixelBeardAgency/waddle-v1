@@ -72,7 +72,8 @@ class ZoomService
                     ->timeout(30)
                     ->post("{$this->baseUrl}/users/me/meetings", [
                         'topic' => "Waddle Consultation #{$consultation->id}",
-                        'type' => 1, // Instant meeting
+                        'type' => 2, // Scheduled meeting (more reliable than instant)
+                        'start_time' => now()->addMinutes(5)->toIso8601String(),
                         'duration' => 60, // Default 60 minutes
                         'timezone' => 'UTC',
                         'settings' => [
@@ -84,9 +85,9 @@ class ZoomService
                             'use_pmi' => false,
                             'approval_type' => 0,
                             'audio' => 'both',
-                            'auto_recording' => 'cloud',
-                            'waiting_room' => true, // Enable Zoom's native waiting room
-                            'allow_multiple_devices' => false,
+                            'auto_recording' => 'none', // Disable recording for testing
+                            'waiting_room' => false, // Disable waiting room for easier testing
+                            'allow_multiple_devices' => true, // Allow multiple devices
                             'meeting_authentication' => false, // Disable authentication requirement
                         ],
                         'password' => '', // Explicitly set no password
@@ -223,13 +224,14 @@ class ZoomService
     {
         $sdkKey = config('services.zoom.sdk_key');
         $sdkSecret = config('services.zoom.sdk_secret');
+        $clientId = config('services.zoom.client_id');
         
         $iat = time();
         $exp = $iat + 60 * 60 * 2; // 2 hours
 
-        // For Meeting SDK, use ONLY sdkKey (not appKey)
+        // For Meeting SDK v5+, use format: appKey:clientId
         $payload = [
-            'sdkKey' => $sdkKey,
+            'appKey' => $sdkKey, // Still using SDK key as the app key
             'mn' => (string) $meetingNumber,
             'role' => (int) $role,
             'iat' => $iat,

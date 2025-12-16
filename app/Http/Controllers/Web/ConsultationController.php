@@ -24,6 +24,17 @@ class ConsultationController extends Controller
             ->with(['matchedConsultant.user'])
             ->latest()
             ->get();
+        
+        // Log for debugging
+        \Log::info('Consultations index', [
+            'user_id' => $user->id,
+            'requests_count' => $requests->count(),
+            'requests' => $requests->map(fn($r) => [
+                'id' => $r->id,
+                'status' => $r->status,
+                'problem_description' => substr($r->problem_description, 0, 50)
+            ])
+        ]);
             
         // Get active/completed consultations
         $consultations = Consultation::where('user_id', $user->id)
@@ -187,8 +198,11 @@ class ConsultationController extends Controller
 
         // Check consultation has a meeting
         if (!$consultation->zoom_meeting_id) {
-            return redirect()->route('consultations.show', $consultation)
-                ->with('error', 'No meeting is available for this consultation yet.');
+            return Inertia::render('Consultation/MeetingUnavailable', [
+                'reason' => 'not_created',
+                'message' => 'No meeting room has been created yet.',
+                'consultation_id' => $consultation->id,
+            ]);
         }
 
         // Check consultation status allows joining
@@ -198,8 +212,32 @@ class ConsultationController extends Controller
         ];
         
         if (!in_array($consultation->status, $allowedStatuses)) {
-            return redirect()->route('consultations.show', $consultation)
-                ->with('error', 'This consultation is not currently active.');
+            $reason = $consultation->status === Consultation::STATUS_COMPLETED 
+                ? 'completed' 
+                : 'not_active';
+            
+            return Inertia::render('Consultation/MeetingUnavailable', [
+                'reason' => $reason,
+                'message' => $consultation->status === Consultation::STATUS_COMPLETED
+                    ? 'This consultation has ended.'
+                    : 'This consultation is not currently active.',
+                'consultation_id' => $consultation->id,
+            ]);
+        }
+
+        // Verify the meeting still exists in Zoom
+        $meetingDetails = $zoomService->getMeeting($consultation->zoom_meeting_id);
+        if (!$meetingDetails) {
+            Log::warning('Zoom meeting not found', [
+                'consultation_id' => $consultation->id,
+                'meeting_id' => $consultation->zoom_meeting_id,
+            ]);
+            
+            return Inertia::render('Consultation/MeetingUnavailable', [
+                'reason' => 'expired',
+                'message' => 'This meeting room has expired or is no longer available.',
+                'consultation_id' => $consultation->id,
+            ]);
         }
 
         $consultation->load(['user', 'consultant.user']);

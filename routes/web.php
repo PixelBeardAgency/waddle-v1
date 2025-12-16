@@ -106,6 +106,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/consultations/{consultation}', [ConsultationController::class, 'show'])->name('consultations.show');
     Route::get('/consultations/{consultation}/meeting', [ConsultationController::class, 'meeting'])->name('consultations.meeting');
     
+    // Alternative route that accepts ConsultationRequest and redirects to Consultation meeting
+    Route::get('/consultation-requests/{consultationRequest}/meeting', function ($consultationRequestId) {
+        $consultationRequest = \App\Models\ConsultationRequest::findOrFail($consultationRequestId);
+        $consultation = \App\Models\Consultation::where('consultation_request_id', $consultationRequest->id)->firstOrFail();
+        return redirect()->route('consultations.meeting', ['consultation' => $consultation->id]);
+    })->name('consultation-requests.meeting');
+    
     // Notifications
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications');
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');

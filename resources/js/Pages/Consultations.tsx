@@ -61,6 +61,14 @@ export default function Consultations() {
   const allRequests = requests || [];
   const allConsultations = consultations || [];
 
+  // Debug logging
+  console.log('Consultations Page Data:', {
+    requests: allRequests,
+    consultations: allConsultations,
+    requestsCount: allRequests.length,
+    consultationsCount: allConsultations.length
+  });
+
   // Filter based on active tab
   const getFilteredItems = () => {
     const activeStatuses = ['pending', 'matching', 'invited', 'matched', 'time_proposed', 'time_counter_proposed', 'scheduled', 'ready', 'in_progress'];
@@ -249,8 +257,8 @@ export default function Consultations() {
                     </div>
                   )}
 
-                  {/* Scheduled/Ready with Join Button */}
-                  {(request.status === 'ready' || (request.status === 'scheduled' && request.agreed_time)) && request.zoom_meeting_id && (
+                  {/* Scheduled/Ready with Join Button - Only show for non-completed */}
+                  {request.status !== 'completed' && request.status !== 'cancelled' && (request.status === 'ready' || (request.status === 'scheduled' && request.agreed_time)) && (
                     <div className="mt-4 flex items-center gap-4">
                       {request.agreed_time && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -258,13 +266,13 @@ export default function Consultations() {
                           <span>{new Date(request.agreed_time).toLocaleString()}</span>
                         </div>
                       )}
-                      {request.status === 'ready' && (
-                        <Link href={`/consultations/${request.id}/meeting`}>
+                      {request.status === 'ready' && request.zoom_meeting_id && (
+                        <a href={`/consultation-requests/${request.id}/meeting`}>
                           <Button size="sm" className="gap-2">
                             <Video className="h-4 w-4" />
                             Join Meeting
                           </Button>
-                        </Link>
+                        </a>
                       )}
                     </div>
                   )}

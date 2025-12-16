@@ -58,8 +58,24 @@ class CreateZoomMeetingJob implements ShouldQueue
                     'status' => ConsultationRequest::STATUS_READY,
                 ]);
 
+                // Create or update the Consultation record
+                $consultationRecord = \App\Models\Consultation::updateOrCreate(
+                    ['consultation_request_id' => $request->id],
+                    [
+                        'user_id' => $request->user_id,
+                        'consultant_id' => $request->matched_consultant_id,
+                        'scheduled_at' => $request->agreed_time,
+                        'duration_minutes' => 60,
+                        'status' => \App\Models\Consultation::STATUS_SCHEDULED,
+                        'zoom_meeting_id' => $meeting['meeting_id'],
+                        'zoom_join_url' => $meeting['join_url'],
+                        'zoom_password' => $meeting['password'] ?? null,
+                    ]
+                );
+
                 Log::info('Zoom meeting created successfully', [
                     'consultation_request_id' => $request->id,
+                    'consultation_id' => $consultationRecord->id,
                     'zoom_meeting_id' => $meeting['meeting_id'],
                 ]);
 
