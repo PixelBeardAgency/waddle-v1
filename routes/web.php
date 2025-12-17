@@ -105,6 +105,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/consultations/{consultationRequest}/counter-time', [ConsultationController::class, 'counterProposeTime'])->name('consultations.counter-time');
     Route::get('/consultations/{consultation}', [ConsultationController::class, 'show'])->name('consultations.show');
     Route::get('/consultations/{consultation}/meeting', [ConsultationController::class, 'meeting'])->name('consultations.meeting');
+    Route::post('/consultations/{consultation}/force-end-zoom', [\App\Http\Controllers\Api\V1\ConsultationController::class, 'forceEndZoomMeeting'])->name('consultations.force-end-zoom');
     
     // Alternative route that accepts ConsultationRequest and redirects to Consultation meeting
     Route::get('/consultation-requests/{consultationRequest}/meeting', function ($consultationRequestId) {

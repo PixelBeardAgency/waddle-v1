@@ -114,6 +114,9 @@ Route::prefix('v1')->group(function () {
         // Zoom SDK signature
         Route::post('/consultations/{id}/zoom-signature', [ConsultationController::class, 'getZoomSignature']);
         
+        // Force end Zoom meeting (for error recovery)
+        Route::post('/consultations/{id}/force-end-zoom', [ConsultationController::class, 'forceEndZoomMeeting']);
+        
         // Token routes
         Route::get('/tokens/balance', [TokenController::class, 'balance']);
         Route::get('/tokens/transactions', [TokenController::class, 'transactions']);

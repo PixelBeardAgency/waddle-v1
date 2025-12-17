@@ -13,6 +13,7 @@ use App\Services\ZoomService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -302,6 +303,22 @@ class ConsultationController extends Controller
             ]);
 
             $consultation->consultationRequest->update(['status' => ConsultationRequest::STATUS_COMPLETED]);
+            
+            // CRITICAL: End the meeting on Zoom's servers to clear server-side state
+            if ($consultation->zoom_meeting_id) {
+                Log::info('Attempting to end Zoom meeting on their servers', [
+                    'consultation_id' => $consultation->id,
+                    'zoom_meeting_id' => $consultation->zoom_meeting_id,
+                ]);
+                
+                $zoomService = app(\App\Services\ZoomService::class);
+                $ended = $zoomService->endMeeting($consultation->zoom_meeting_id);
+                
+                Log::info('Zoom meeting end result', [
+                    'consultation_id' => $consultation->id,
+                    'success' => $ended,
+                ]);
+            }
 
             AuditLog::log(
                 'consultation_ended',
@@ -575,6 +592,52 @@ class ConsultationController extends Controller
             'files_count' => $consultation->files->count(),
             'created_at' => $consultation->created_at,
         ];
+    }
+
+    /**
+     * Force end a Zoom meeting (for error recovery).
+     * This is used when a join attempt fails but Zoom's servers think the user is still in the meeting.
+     */
+    public function forceEndZoomMeeting(Request $request, int $id): JsonResponse
+    {
+        $consultation = Consultation::findOrFail($id);
+
+        if (!$consultation->zoom_meeting_id) {
+            return response()->json([
+                'message' => 'No Zoom meeting associated with this consultation',
+            ], 400);
+        }
+
+        Log::info('Force ending Zoom meeting for error recovery', [
+            'consultation_id' => $consultation->id,
+            'zoom_meeting_id' => $consultation->zoom_meeting_id,
+            'user_id' => $request->user()->id,
+        ]);
+
+        $zoomService = app(\App\Services\ZoomService::class);
+        $ended = $zoomService->endMeeting($consultation->zoom_meeting_id);
+
+        if ($ended) {
+            Log::info('Successfully force-ended Zoom meeting', [
+                'consultation_id' => $consultation->id,
+                'zoom_meeting_id' => $consultation->zoom_meeting_id,
+            ]);
+
+            return response()->json([
+                'message' => 'Zoom meeting ended on servers',
+                'success' => true,
+            ]);
+        }
+
+        Log::warning('Failed to force-end Zoom meeting', [
+            'consultation_id' => $consultation->id,
+            'zoom_meeting_id' => $consultation->zoom_meeting_id,
+        ]);
+
+        return response()->json([
+            'message' => 'Failed to end Zoom meeting (may already be ended)',
+            'success' => false,
+        ]);
     }
 }
 

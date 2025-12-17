@@ -43,6 +43,22 @@ export default function Meeting() {
   const meetingContainerRef = useRef<HTMLDivElement>(null);
   const zoomClientRef = useRef<any>(null);
   const hasJoinedRef = useRef(false);
+  const isJoiningRef = useRef(false); // Prevent duplicate join operations
+  const initializedRef = useRef(false); // Prevent double initialization (React 18 StrictMode)
+
+  // Global error handler to suppress Zoom SDK's internal 'filter' bug
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      if (event.message && event.message.includes("Cannot read properties of undefined (reading 'filter')")) {
+        console.warn('⚠️ Suppressing known Zoom SDK filter bug');
+        event.preventDefault();
+        return true;
+      }
+    };
+
+    window.addEventListener('error', handleError, true);
+    return () => window.removeEventListener('error', handleError, true);
+  }, []);
 
   useEffect(() => {
     console.log('=== COMPONENT MOUNTED ===');
@@ -50,12 +66,11 @@ export default function Meeting() {
     console.log('User:', userName);
     console.log('Role:', role === 1 ? 'Host/Consultant' : 'Participant/User');
     
-    // Check if we came from a previous meeting (page reload scenario)
-    const hadPreviousMeeting = sessionStorage.getItem('waddle_in_meeting');
-    if (hadPreviousMeeting) {
-      console.log('⚠️ Detected previous meeting session, clearing...');
-      sessionStorage.removeItem('waddle_in_meeting');
-    }
+    // Clear ALL session flags on mount to prevent reload loops
+    console.log('🧹 Clearing all session flags on mount...');
+    sessionStorage.removeItem('waddle_in_meeting');
+    sessionStorage.removeItem('waddle_left_meeting');
+    sessionStorage.removeItem('waddle_join_attempts');
 
     return () => {
       console.log('=== COMPONENT UNMOUNTING ===');
@@ -93,33 +108,19 @@ export default function Meeting() {
   const joinMeeting = async () => {
     console.log('=== JOIN MEETING CALLED ===');
     console.log('hasJoinedRef:', hasJoinedRef.current);
+    console.log('isJoiningRef:', isJoiningRef.current);
     console.log('isJoined:', isJoined);
     console.log('Current zoomClientRef:', zoomClientRef.current);
 
-    // Check if we just left a meeting - if so, FORCE PAGE RELOAD to reset Zoom SDK
-    const justLeftMeeting = sessionStorage.getItem('waddle_left_meeting');
-    if (justLeftMeeting) {
-      console.log('🔄 Detected previous meeting exit - RELOADING PAGE to reset Zoom SDK...');
-      sessionStorage.removeItem('waddle_left_meeting');
-      // Add cache buster to force fresh page load
-      window.location.href = window.location.href.split('?')[0] + '?v=' + Date.now();
+    // CRITICAL: Prevent duplicate join operations
+    if (isJoiningRef.current) {
+      console.log('⚠️ Already joining, preventing duplicate operation...');
       return;
     }
-    
-    // Track how many times we've tried to join
-    const joinAttempts = parseInt(sessionStorage.getItem('waddle_join_attempts') || '0');
-    if (joinAttempts > 0) {
-      console.log(`⚠️ This is join attempt #${joinAttempts + 1} - clearing and reloading...`);
-      sessionStorage.removeItem('waddle_join_attempts');
-      sessionStorage.setItem('waddle_left_meeting', 'true');
-      window.location.href = window.location.href.split('?')[0] + '?fresh=' + Date.now();
-      return;
-    }
-    sessionStorage.setItem('waddle_join_attempts', String(joinAttempts + 1));
 
     // Prevent duplicate joins
     if (hasJoinedRef.current || isJoined) {
-      console.log('⚠️ Already joined or joining, skipping...');
+      console.log('⚠️ Already joined, skipping...');
       return;
     }
 
@@ -129,6 +130,10 @@ export default function Meeting() {
       return;
     }
 
+    // Mark as joining to prevent duplicate calls
+    isJoiningRef.current = true;
+    console.log('🔒 isJoiningRef set to true - blocking duplicate calls');
+    
     // Mark as joined immediately to prevent duplicates
     hasJoinedRef.current = true;
     setIsLoading(true);
@@ -136,96 +141,23 @@ export default function Meeting() {
     
     // Mark that we're in a meeting
     sessionStorage.setItem('waddle_in_meeting', 'true');
-
-    // NUCLEAR CLEANUP: Destroy ALL possible Zoom state
-    console.log('🧹 Starting nuclear cleanup...');
     
-    // 1. Try to leave and destroy current client
+    // Cleanup existing client if any
     if (zoomClientRef.current) {
-      console.log('Cleaning up existing client...');
+      console.log('🧹 Cleaning up existing client...');
       try {
-        // Check if we're in a meeting first
-        const getCurrentUser = zoomClientRef.current.getCurrentUser?.();
-        console.log('Current user in client:', getCurrentUser);
-        
-        if (getCurrentUser) {
-          console.log('User is in meeting, leaving...');
-          await zoomClientRef.current.leaveMeeting();
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        console.log('Destroying client...');
         zoomClientRef.current?.destroy?.();
-        await new Promise(resolve => setTimeout(resolve, 500));
       } catch (e) {
         console.log('Cleanup error (ignoring):', e);
       }
       zoomClientRef.current = null;
+      initializedRef.current = false; // Reset initialization flag
     }
     
-    // 2. Clear any browser storage that Zoom might use
-    console.log('Clearing browser storage...');
-    try {
-      // Clear session storage
-      const keysToRemove = [];
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const key = sessionStorage.key(i);
-        if (key && (key.includes('zoom') || key.includes('ZM') || key.includes('wc'))) {
-          keysToRemove.push(key);
-        }
-      }
-      keysToRemove.forEach(key => sessionStorage.removeItem(key));
-      console.log('Cleared session storage keys:', keysToRemove);
-      
-      // Clear local storage
-      const localKeysToRemove = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.includes('zoom') || key.includes('ZM') || key.includes('wc'))) {
-          localKeysToRemove.push(key);
-        }
-      }
-      localKeysToRemove.forEach(key => localStorage.removeItem(key));
-      console.log('Cleared local storage keys:', localKeysToRemove);
-    } catch (e) {
-      console.log('Storage cleanup error (ignoring):', e);
-    }
-    
-    // 3. Wait for everything to settle
-    console.log('Waiting for cleanup to complete...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // 4. Create fresh client
+    // Create fresh client
     console.log('Creating fresh Zoom client...');
     zoomClientRef.current = ZoomMtgEmbedded.createClient();
     console.log('New client created:', zoomClientRef.current);
-    
-    // CRITICAL: Check if already in a meeting
-    try {
-      const currentUser = zoomClientRef.current.getCurrentUser?.();
-      const currentMeeting = zoomClientRef.current.getCurrentMeetingInfo?.();
-      console.log('Current Zoom state check:', { currentUser, currentMeeting });
-      
-      if (currentUser || currentMeeting) {
-        console.log('⚠️ ZOOM SDK STILL HAS ACTIVE STATE - Forcing cleanup...');
-        await zoomClientRef.current.leaveMeeting().catch(() => {});
-        zoomClientRef.current = null;
-        
-        // Set flag to reload page
-        sessionStorage.setItem('waddle_left_meeting', 'true');
-        setError('Detected active Zoom session. Reloading to clear state...');
-        setTimeout(() => window.location.reload(), 1000);
-        return;
-      }
-    } catch (e) {
-      console.log('State check error (ignoring):', e);
-    }
-
-    // Show the container
-    setIsJoined(true);
-    
-    // Wait for container to be rendered
-    await new Promise(resolve => setTimeout(resolve, 800));
 
     try {
       if (!meetingContainerRef.current) {
@@ -240,27 +172,38 @@ export default function Meeting() {
         containerElement: meetingContainerRef.current.id,
       });
 
-      // Initialize the meeting SDK in the container
-      await zoomClientRef.current.init({
-        zoomAppRoot: meetingContainerRef.current,
-        language: 'en-US',
-        customize: {
-          video: {
-            isResizable: false,
-            viewSizes: {
-              default: {
-                width: '100%',
-                height: '100%',
+      // Guard against double initialization (React 18 StrictMode/double-mount issue)
+      if (initializedRef.current) {
+        console.log('⚠️ SDK already initialized, skipping init...');
+      } else {
+        console.log('Initializing Zoom SDK...');
+        
+        // Initialize the meeting SDK in the container
+        await zoomClientRef.current.init({
+          zoomAppRoot: meetingContainerRef.current,
+          language: 'en-US',
+          customize: {
+            video: {
+              isResizable: false,
+              viewSizes: {
+                default: {
+                  width: '100%',
+                  height: '100%',
+                },
+              },
+              popper: {
+                disableDraggable: false,
               },
             },
-            popper: {
-              disableDraggable: false,
-            },
           },
-        },
-      });
+        });
 
-      console.log('✅ Zoom SDK initialized successfully, joining meeting...');
+        // Mark as initialized to prevent double init
+        initializedRef.current = true;
+        console.log('✅ Zoom SDK initialized successfully');
+      }
+
+      console.log('Joining meeting...');
       console.log('Join parameters:', {
         meetingNumber,
         userName,
@@ -282,14 +225,25 @@ export default function Meeting() {
           zak: '',
         });
         console.log('✅ Successfully joined meeting!');
+        
+        // Mark as joined ONLY after successful join
+        setIsJoined(true);
+        isJoiningRef.current = false; // Reset joining flag after success
+        console.log('🔓 isJoiningRef reset to false after successful join');
       } catch (joinError: any) {
         console.error('❌ JOIN ERROR DETAILS:', {
           type: joinError.type,
           reason: joinError.reason,
           errorCode: joinError.errorCode,
           message: joinError.message,
-          fullError: joinError,
         });
+        console.error('❌ JOIN ERROR (stringified):', JSON.stringify({
+          type: joinError.type,
+          reason: joinError.reason,
+          errorCode: joinError.errorCode,
+          message: joinError.message,
+          stack: joinError.stack,
+        }, null, 2));
         throw joinError;
       }
       
@@ -358,22 +312,18 @@ export default function Meeting() {
     } catch (err: any) {
       console.error('❌ Failed to join meeting:', err);
       
-      // Special handling for "already in meeting" error
+      // Set error message based on error type
+      let errorMessage = err.reason || err.message || 'Failed to join meeting. Please try again.';
+      
       if (err.errorCode === 3000 || err.reason?.includes('Already has other meetings')) {
-        console.log('🔄 Detected "already in meeting" error - setting reload flag');
-        sessionStorage.setItem('waddle_left_meeting', 'true');
-        setError('You have an active meeting session. The page will reload to reset the connection...');
-        // Auto-reload after showing error
-        setTimeout(() => {
-          window.location.reload();
-        }, 2000);
-      } else {
-        setError(err.reason || err.message || 'Failed to join meeting. Please try again.');
+        errorMessage = 'You have an active meeting session. Please close any other Zoom tabs/windows and try again. If the issue persists, please clear your browser cache or use an incognito window.';
       }
       
+      setError(errorMessage);
       setIsLoading(false);
       setIsJoined(false);
       hasJoinedRef.current = false; // Reset on error
+      isJoiningRef.current = false; // Reset joining flag
       sessionStorage.removeItem('waddle_in_meeting');
     }
   };
@@ -480,40 +430,44 @@ export default function Meeting() {
           )}
 
           {/* Meeting Container */}
-          {!isJoined ? (
-            <div className="bg-card border border-border rounded-2xl p-12 text-center">
-              {isLoading ? (
-                <div className="flex flex-col items-center gap-4">
-                  <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                  <p className="text-muted-foreground">Joining meeting...</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-6">
-                  <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Phone className="h-10 w-10 text-primary" />
+          <div className="relative">
+            {/* Pre-join screen - overlays the Zoom container until joined */}
+            {!isJoined && (
+              <div className="bg-card border border-border rounded-2xl p-12 text-center">
+                {isLoading ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                    <p className="text-muted-foreground">Joining meeting...</p>
                   </div>
-                  <div>
-                    <h2 className="text-xl font-semibold text-foreground mb-2">
-                      Ready to Join
-                    </h2>
-                    <p className="text-muted-foreground mb-6">
-                      Click below to join the video consultation with{' '}
-                      {role === 1 ? consultation.user.full_name : consultation.consultant.user.full_name}
-                    </p>
+                ) : (
+                  <div className="flex flex-col items-center gap-6">
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Phone className="h-10 w-10 text-primary" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-semibold text-foreground mb-2">
+                        Ready to Join
+                      </h2>
+                      <p className="text-muted-foreground mb-6">
+                        Click below to join the video consultation with{' '}
+                        {role === 1 ? consultation.user.full_name : consultation.consultant.user.full_name}
+                      </p>
+                    </div>
+                    <Button 
+                      size="lg" 
+                      onClick={joinMeeting}
+                      disabled={isLoading || isJoined}
+                    >
+                      <Phone className="mr-2 h-5 w-5" />
+                      Join Meeting
+                    </Button>
                   </div>
-                  <Button 
-                    size="lg" 
-                    onClick={joinMeeting}
-                    disabled={isLoading || isJoined}
-                  >
-                    <Phone className="mr-2 h-5 w-5" />
-                    Join Meeting
-                  </Button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4">
+                )}
+              </div>
+            )}
+
+            {/* Zoom container - always rendered in DOM */}
+            <div className={!isJoined ? 'hidden' : 'space-y-4'}>
               {/* Zoom will render its UI here */}
               <div 
                 ref={meetingContainerRef}
@@ -523,14 +477,16 @@ export default function Meeting() {
               />
               
               {/* Leave button */}
-              <div className="flex justify-center">
-                <Button variant="destructive" onClick={leaveMeeting}>
-                  <PhoneOff className="mr-2 h-5 w-5" />
-                  Leave Meeting
-                </Button>
-              </div>
+              {isJoined && (
+                <div className="flex justify-center">
+                  <Button variant="destructive" onClick={leaveMeeting}>
+                    <PhoneOff className="mr-2 h-5 w-5" />
+                    Leave Meeting
+                  </Button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Meeting Info */}
           <div className="mt-8 p-4 bg-muted/50 rounded-xl">

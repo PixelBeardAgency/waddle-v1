@@ -22,7 +22,7 @@
         "@inertiajs/react": "^2.2.19",
         "@radix-ui/react-slot": "^1.2.4",
         "@vitejs/plugin-react": "^5.1.2",
-        "@zoom/meetingsdk": "^5.0.0",
+        "@zoom/meetingsdk": "^3.8.10",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "lucide-react": "^0.556.0",
